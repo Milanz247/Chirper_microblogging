@@ -13,6 +13,8 @@
 
 ![Screenshot from 2023-10-07 17-18-34](https://github.com/Msenarathna47/Chirper_microblogging/assets/117444289/705e634c-7327-4e4c-a6b6-94fa41eca085)
 
+file:///home/milan/Pictures/Screenshots/a.png
+
 
 
 <br>
