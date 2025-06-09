@@ -1,45 +1,52 @@
-# 1. Base Image (PHP-FPM සහ Alpine Linux)
-FROM php:8.1-fpm-alpine
+# Stage 1: Composer dependencies ස්ථාපනය කිරීම
+FROM composer:2 as vendor
+WORKDIR /app
+COPY database/ database/
+COPY composer.json composer.json
+COPY composer.lock composer.lock
+RUN composer install --no-interaction --no-plugins --no-scripts --prefer-dist --optimize-autoloader
 
-# 2. Working Directory
+# Stage 2: Frontend assets build කිරීම
+FROM node:18-alpine as frontend
+WORKDIR /app
+COPY package.json package.json
+COPY package-lock.json package-lock.json
+COPY vite.config.js vite.config.js
+COPY resources/ resources/
+RUN npm ci && npm run build
+
+# Stage 3: අවසාන Production Image එක සෑදීම
+FROM php:8.2-fpm-alpine
+
 WORKDIR /var/www/html
 
-# 3. අවශ්‍ය dependencies install කිරීම
-RUN apk add --no-cache \
-    libpng-dev \
-    libzip-dev \
-    jpeg-dev \
-    freetype-dev \
-    nodejs \
-    npm \
-    git \
-    unzip \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install pdo pdo_mysql gd zip bcmath
+# අවශ්‍ය PHP extensions install කිරීම
+# libpq-dev එක PostgreSQL වලට, libzip-dev එක zip වලට.
+RUN apk add --no-cache oniguruma-dev libxml2-dev libzip-dev libpq-dev && \
+    docker-php-ext-install bcmath ctype fileinfo mbstring pdo pdo_mysql pdo_pgsql tokenizer xml zip
 
-# 4. Composer install කිරීම
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+# Nginx install කිරීම
+RUN apk add --no-cache nginx
 
-# 5. Application files copy කිරීම
+# Nginx configuration file එක copy කිරීම
+COPY docker/nginx.conf /etc/nginx/nginx.conf
+
+# කලින් stages වලින් build කරපු දේවල් copy කිරීම
+COPY --from=vendor /app/vendor/ /var/www/html/vendor/
+COPY --from=frontend /app/public/build /var/www/html/public/build
 COPY . .
 
-# 6. Composer dependencies install කිරීම
-RUN composer install --optimize-autoloader --no-dev
+# Permissions සහ ownership සකස් කිරීම
+# www-data කියන්නේ php-fpm සහ nginx වල default user/group එක
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache && \
+    chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
 
-# 7. NPM dependencies install කරලා build කිරීම
-RUN npm install && npm run build
+# Application එකේ entrypoint script එක copy කරලා execute permission දෙනවා
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# 8. Laravel permissions හරිගස්සන එක
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
-RUN chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+# Port 80 expose කරනවා
+EXPOSE 80
 
-# 9. Laravel optimizations
-RUN php artisan config:cache
-RUN php artisan route:cache
-RUN php artisan view:cache
-
-# 10. Port එක expose කිරීම
-EXPOSE 9000
-
-# 11. Container එක start කරන command එක
-CMD ["php-fpm"]
+# Entrypoint එක run කරනවා
+ENTRYPOINT ["entrypoint.sh"]
